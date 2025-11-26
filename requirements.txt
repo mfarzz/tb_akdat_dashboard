@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+sqlalchemy
+streamlit-aggrid
+plotly
+scikit-learn
+pytest
+psycopg2-binary
+python-dotenv

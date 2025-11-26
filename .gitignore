@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Environments
+env/
+venv/
+.venv/
+ENV/
+.ENV/
+venv.bak/
+
+# dotenv / secrets
+.env
+.env.* 
+.secrets
+secrets.toml
+.streamlit/secrets.toml
+
+# Streamlit cache / temp
+.streamlit/*.lock
+
+# Editor / OS
+.vscode/
+.idea/
+*.sublime-*
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# SQLite / DB files
+*.sqlite3
+*.db
+
+# Logs
+*.log
+
+# byte-compiled / others
+*.so
+*.dylib
+
+# Optional: ignore local secrets/config (uncomment if desired)
+# tb_dashboard/.streamlit/config.toml
