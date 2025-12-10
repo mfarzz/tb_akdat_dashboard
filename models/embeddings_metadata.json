@@ -1,0 +1,11 @@
+{
+  "texts_hash": "54055e8427cecd72f6ed5ed17aa916500b8ddc3d4c152480972430e415ac897b",
+  "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "embedding_dim": 384,
+  "num_texts": 19636,
+  "cache_date": "2025-12-10T18:22:09.714769",
+  "shape": [
+    19636,
+    384
+  ]
+}

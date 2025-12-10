@@ -1,7 +1,7 @@
 import pandas as pd
 from sqlalchemy.orm import joinedload
 from helpers.date_extractor import extract_all_dates, extract_relevant_date
-from helpers.location_extractor import extract_all_locations, extract_relevant_location
+from helpers.location_extractor import extract_all_locations, extract_relevant_location, extract_relevant_province
 import swifter
 
 from db.connection import SessionLocal
@@ -42,4 +42,5 @@ def enrich_with_dates(df):
 def enrich_with_locations(df):
     df["all_locations"] = df["content"].swifter.apply(extract_all_locations)
     df["relevant_location"] = df["content"].swifter.apply(extract_relevant_location)
+    df["relevant_province"] = df["content"].swifter.apply(extract_relevant_province)
     return df

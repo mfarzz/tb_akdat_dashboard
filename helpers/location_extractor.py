@@ -209,3 +209,146 @@ def extract_relevant_location(text: str) -> Optional[str]:
     all_locations = extract_all_locations(text)
     return all_locations[0] if all_locations else None
 
+# Mapping kota ke provinsi
+KOTA_TO_PROVINSI = {
+    "jakarta": "DKI Jakarta",
+    "surabaya": "Jawa Timur",
+    "bandung": "Jawa Barat",
+    "medan": "Sumatera Utara",
+    "semarang": "Jawa Tengah",
+    "makassar": "Sulawesi Selatan",
+    "palembang": "Sumatera Selatan",
+    "depok": "Jawa Barat",
+    "tangerang": "Banten",
+    "bekasi": "Jawa Barat",
+    "bandar lampung": "Lampung",
+    "padang": "Sumatera Barat",
+    "malang": "Jawa Timur",
+    "pekanbaru": "Riau",
+    "denpasar": "Bali",
+    "batam": "Kepulauan Riau",
+    "bogor": "Jawa Barat",
+    "yogyakarta": "DI Yogyakarta",
+    "surakarta": "Jawa Tengah",
+    "pontianak": "Kalimantan Barat",
+    "banjarmasin": "Kalimantan Selatan",
+    "samarinda": "Kalimantan Timur",
+    "manado": "Sulawesi Utara",
+    "jambi": "Jambi",
+    "cimahi": "Jawa Barat",
+    "balikpapan": "Kalimantan Timur",
+    "serang": "Banten",
+    "mataram": "Nusa Tenggara Barat",
+    "kupang": "Nusa Tenggara Timur",
+    "jayapura": "Papua",
+    "ambon": "Maluku",
+    "palu": "Sulawesi Tengah",
+    "kendari": "Sulawesi Tenggara",
+    "gorontalo": "Gorontalo",
+    "ternate": "Maluku Utara",
+    "sorong": "Papua Barat"
+}
+
+# Normalisasi nama provinsi untuk konsistensi
+PROVINSI_NORMALIZED = {
+    "aceh": "Aceh",
+    "sumatera utara": "Sumatera Utara",
+    "sumatera barat": "Sumatera Barat",
+    "riau": "Riau",
+    "kepulauan riau": "Kepulauan Riau",
+    "jambi": "Jambi",
+    "sumatera selatan": "Sumatera Selatan",
+    "bangka belitung": "Bangka Belitung",
+    "bengkulu": "Bengkulu",
+    "lampung": "Lampung",
+    "dki jakarta": "DKI Jakarta",
+    "jakarta": "DKI Jakarta",
+    "jawa barat": "Jawa Barat",
+    "jawa tengah": "Jawa Tengah",
+    "di yogyakarta": "DI Yogyakarta",
+    "yogyakarta": "DI Yogyakarta",
+    "jawa timur": "Jawa Timur",
+    "banten": "Banten",
+    "bali": "Bali",
+    "nusa tenggara barat": "Nusa Tenggara Barat",
+    "nusa tenggara timur": "Nusa Tenggara Timur",
+    "kalimantan barat": "Kalimantan Barat",
+    "kalimantan tengah": "Kalimantan Tengah",
+    "kalimantan selatan": "Kalimantan Selatan",
+    "kalimantan timur": "Kalimantan Timur",
+    "kalimantan utara": "Kalimantan Utara",
+    "sulawesi utara": "Sulawesi Utara",
+    "sulawesi tengah": "Sulawesi Tengah",
+    "sulawesi selatan": "Sulawesi Selatan",
+    "sulawesi tenggara": "Sulawesi Tenggara",
+    "gorontalo": "Gorontalo",
+    "sulawesi barat": "Sulawesi Barat",
+    "maluku": "Maluku",
+    "maluku utara": "Maluku Utara",
+    "papua barat": "Papua Barat",
+    "papua": "Papua"
+}
+
+def _normalize_to_province(location: str) -> Optional[str]:
+    """
+    Normalize location name to province name
+    
+    Args:
+        location: Location name (can be city or province)
+        
+    Returns:
+        Normalized province name or None
+    """
+    if not location:
+        return None
+    
+    location_lower = location.strip().lower()
+    
+    # Remove common prefixes
+    location_lower = location_lower.replace("dki ", "").replace("di ", "")
+    location_lower = location_lower.replace("kota ", "").replace("kabupaten ", "").replace("provinsi ", "")
+    location_lower = location_lower.strip()
+    
+    # Check if it's already a province
+    if location_lower in PROVINSI_NORMALIZED:
+        return PROVINSI_NORMALIZED[location_lower]
+    
+    # Check if it's a city and map to province
+    if location_lower in KOTA_TO_PROVINSI:
+        return KOTA_TO_PROVINSI[location_lower]
+    
+    # Try to match with province list (partial match)
+    for prov_key, prov_name in PROVINSI_NORMALIZED.items():
+        if prov_key in location_lower or location_lower in prov_key:
+            return prov_name
+    
+    # Try to match with city list and get province
+    for kota_key, prov_name in KOTA_TO_PROVINSI.items():
+        if kota_key in location_lower or location_lower in kota_key:
+            return prov_name
+    
+    return None
+
+def extract_relevant_province(text: str) -> Optional[str]:
+    """
+    Extract the most relevant province from text
+    Maps cities to their provinces
+    
+    Args:
+        text: Text content to extract province from
+        
+    Returns:
+        Most relevant province found, or None if no province found
+    """
+    if not text:
+        return None
+    
+    # First extract location
+    location = extract_relevant_location(text)
+    if not location:
+        return None
+    
+    # Normalize to province
+    province = _normalize_to_province(location)
+    return province
+

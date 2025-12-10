@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import sys
 import time
 import logging
@@ -428,7 +429,11 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
         filtered_df = filtered_df[filtered_df["classifications"].fillna("(unknown)").isin(st.session_state.active_filters['classifications'])]
     
     if st.session_state.active_filters.get('locations'):
-        filtered_df = filtered_df[filtered_df["relevant_location"].isin(st.session_state.active_filters['locations'])]
+        # Filter bisa menggunakan relevant_location atau relevant_province
+        if "relevant_province" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df["relevant_province"].isin(st.session_state.active_filters['locations'])]
+        elif "relevant_location" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df["relevant_location"].isin(st.session_state.active_filters['locations'])]
     
     if st.session_state.active_filters.get('platforms'):
         if "platform" not in filtered_df.columns and "source_url" in filtered_df.columns:
@@ -805,13 +810,229 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
     with tab2:
         st.markdown("### Persebaran Geografis")
         
-        # Gunakan data lokasi yang diekstrak dari content
-        if "relevant_location" in filtered_df.columns:
-            location_df = filtered_df[filtered_df["relevant_location"].notna()].copy()
+        # Gunakan data provinsi yang diekstrak dari content
+        if "relevant_province" in filtered_df.columns:
+            province_df = filtered_df[filtered_df["relevant_province"].notna()].copy()
             
-            if not location_df.empty:
-                location_counts = location_df["relevant_location"].value_counts().reset_index()
-                location_counts.columns = ["location", "count"]
+            if not province_df.empty:
+                province_counts = province_df["relevant_province"].value_counts().reset_index()
+                province_counts.columns = ["province", "count"]
+                
+                # Koordinat provinsi Indonesia (lat, lon untuk bubble map)
+                PROVINCE_COORDS = {
+                    "Aceh": (4.6951, 96.7494),
+                    "Sumatera Utara": (2.1157, 99.5451),
+                    "Sumatera Barat": (-0.9492, 100.8000),
+                    "Riau": (0.2933, 101.7068),
+                    "Kepulauan Riau": (0.9167, 104.4500),
+                    "Jambi": (-1.6101, 103.6131),
+                    "Sumatera Selatan": (-2.9761, 104.7754),
+                    "Bangka Belitung": (-2.1333, 106.1333),
+                    "Bengkulu": (-3.7928, 102.2603),
+                    "Lampung": (-5.4500, 105.2667),
+                    "DKI Jakarta": (-6.2088, 106.8456),
+                    "Jawa Barat": (-6.9175, 107.6191),
+                    "Jawa Tengah": (-7.2050, 110.4100),
+                    "DI Yogyakarta": (-7.7956, 110.3695),
+                    "Jawa Timur": (-7.2504, 112.7688),
+                    "Banten": (-6.4058, 106.0640),
+                    "Bali": (-8.4095, 115.1889),
+                    "Nusa Tenggara Barat": (-8.5833, 116.1167),
+                    "Nusa Tenggara Timur": (-10.1718, 123.6075),
+                    "Kalimantan Barat": (0.0236, 109.3414),
+                    "Kalimantan Tengah": (-2.2100, 113.9200),
+                    "Kalimantan Selatan": (-3.3194, 114.5908),
+                    "Kalimantan Timur": (-0.5021, 117.1536),
+                    "Kalimantan Utara": (3.3167, 117.6000),
+                    "Sulawesi Utara": (1.4748, 124.8421),
+                    "Sulawesi Tengah": (-0.9000, 119.8833),
+                    "Sulawesi Selatan": (-5.1477, 119.4327),
+                    "Sulawesi Tenggara": (-3.9984, 122.5129),
+                    "Gorontalo": (0.5333, 123.0667),
+                    "Sulawesi Barat": (-2.6688, 118.8622),
+                    "Maluku": (-3.6561, 128.1667),
+                    "Maluku Utara": (0.7833, 127.3667),
+                    "Papua Barat": (-0.8667, 134.0833),
+                    "Papua": (-2.5333, 140.7167)
+                }
+                
+                # Tambahkan koordinat ke dataframe
+                province_counts["lat"] = province_counts["province"].map(lambda x: PROVINCE_COORDS.get(x, (None, None))[0])
+                province_counts["lon"] = province_counts["province"].map(lambda x: PROVINCE_COORDS.get(x, (None, None))[1])
+                
+                # Filter hanya provinsi yang punya koordinat
+                province_counts = province_counts[province_counts["lat"].notna()].copy()
+                
+                if not province_counts.empty:
+                    # Peta dengan grouping seperti contoh Plotly docs
+                    st.markdown("#### Peta Persebaran Hoaks per Provinsi")
+                    
+                    try:
+                        logger.info("Mencoba membuat peta dengan go.Scattergeo (grouped bubbles)...")
+                        logger.info(f"Data provinsi: {len(province_counts)} provinsi")
+                        
+                        # Pastikan kolom lat dan lon ada dan tidak null
+                        if "lat" not in province_counts.columns or "lon" not in province_counts.columns:
+                            raise ValueError("Kolom lat atau lon tidak ditemukan")
+                        
+                        if province_counts["lat"].isna().any() or province_counts["lon"].isna().any():
+                            logger.warning("Ada nilai null di kolom lat/lon, menghapus...")
+                            province_counts = province_counts.dropna(subset=["lat", "lon"])
+                        
+                        logger.info(f"Data setelah cleaning: {len(province_counts)} provinsi")
+                        
+                        # Buat text untuk hover
+                        province_counts = province_counts.copy()
+                        province_counts['text'] = province_counts['province'] + '<br>Jumlah Hoaks: ' + province_counts['count'].astype(str)
+                        
+                        # Untuk memperbesar bubble: gunakan multiplier yang lebih besar
+                        # Formula: size = count * multiplier (semakin besar multiplier, semakin besar bubble)
+                        multiplier = 5.0  # Multiplier untuk memperbesar ukuran bubble
+                        
+                        # Buat color map untuk setiap provinsi (setiap provinsi dapat warna berbeda)
+                        # Gunakan color palette yang cukup banyak untuk membedakan provinsi
+                        import plotly.express as px
+                        num_provinces = len(province_counts)
+                        color_palette = px.colors.qualitative.Set3 + px.colors.qualitative.Pastel + px.colors.qualitative.Dark2 + px.colors.qualitative.Set1
+                        # Buat mapping provinsi ke warna
+                        province_color_map = {}
+                        for idx, province in enumerate(province_counts['province']):
+                            province_color_map[province] = color_palette[idx % len(color_palette)]
+                        
+                        # Buat figure dengan go.Figure (sudah di-import di atas)
+                        fig_map = go.Figure()
+                        
+                        # Tambahkan trace untuk setiap provinsi (setiap provinsi dapat warna berbeda)
+                        for idx, row in province_counts.iterrows():
+                            province = row['province']
+                            fig_map.add_trace(go.Scattergeo(
+                                lon=[row['lon']],
+                                lat=[row['lat']],
+                                text=[row['text']],
+                                marker=dict(
+                                    size=[row['count'] * multiplier],
+                                    color=province_color_map[province],
+                                    line_color='rgb(40,40,40)',
+                                    line_width=0.5,
+                                    sizemode='area',
+                                    opacity=0.7
+                                ),
+                                name=province,  # Nama trace adalah nama provinsi
+                                hovertemplate='<b>%{text}</b><extra></extra>',
+                                showlegend=True
+                            ))
+                        
+                        # Update layout
+                        fig_map.update_layout(
+                            title_text='Persebaran Hoaks per Provinsi di Indonesia<br>(Klik legend untuk toggle provinsi)',
+                            showlegend=True,
+                            height=600,
+                            margin=dict(l=0, r=0, t=60, b=0),
+                            legend=dict(
+                                title="Provinsi",
+                                itemsizing="constant",
+                                font=dict(size=9),
+                                bgcolor="rgba(255,255,255,0.8)",
+                                bordercolor="rgba(0,0,0,0.2)",
+                                borderwidth=1
+                            ),
+                            geo=dict(
+                                scope='asia',
+                                center=dict(lat=-2.5, lon=118),
+                                projection_scale=3.5,
+                                lonaxis_range=[95, 141],
+                                lataxis_range=[-11, 6],
+                                showland=True,
+                                landcolor='rgb(217, 217, 217)',
+                                showocean=True,
+                                oceancolor='rgb(230, 245, 255)',
+                                showcountries=True,
+                                countrycolor='rgb(102, 102, 102)',
+                                bgcolor='white'
+                            )
+                        )
+                        
+                        logger.info("Peta go.Scattergeo berhasil dibuat")
+                        st.plotly_chart(fig_map, use_container_width=True)
+                        
+                        # Info untuk upgrade ke Mapbox (opsional)
+                        with st.expander("💡 Tips: Ingin peta yang lebih detail?"):
+                            st.markdown("""
+                            Untuk peta yang lebih detail dan interaktif, Anda bisa menggunakan **Mapbox** dengan API key:
+                            - Daftar di [mapbox.com](https://www.mapbox.com) untuk mendapatkan API key gratis
+                            - Tambahkan ke `.streamlit/secrets.toml`: `MAPBOX_TOKEN = "your_token"`
+                            - Ganti `mapbox_style="open-street-map"` menjadi `mapbox_style="mapbox://styles/mapbox/streets-v11"`
+                            """)
+                        
+                    except Exception as e:
+                        # Log error detail
+                        error_msg = str(e)
+                        error_type = type(e).__name__
+                        logger.error(f"Error saat membuat scatter_mapbox: {error_type}: {error_msg}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        
+                        # Tampilkan error di UI untuk debugging
+                        st.error(f"❌ Error saat membuat peta OpenStreetMap: {error_type}")
+                        with st.expander("🔍 Detail Error (Klik untuk melihat)"):
+                            st.code(f"{error_type}: {error_msg}")
+                            st.code(traceback.format_exc())
+                        
+                        # Fallback ke scatter_geo dengan style yang lebih baik
+                        st.warning("⚠️ Menggunakan peta alternatif (scatter_geo)...")
+                        logger.info("Menggunakan fallback scatter_geo...")
+                        
+                        try:
+                            fig_map = px.scatter_geo(
+                                province_counts,
+                                lat="lat",
+                                lon="lon",
+                                size="count",
+                                hover_name="province",
+                                hover_data={"count": True, "lat": False, "lon": False},
+                                size_max=50,
+                                title="Peta Persebaran Hoaks per Provinsi",
+                                color="count",
+                                color_continuous_scale="Reds",
+                                projection="natural earth"
+                            )
+                            fig_map.update_geos(
+                                resolution=110,
+                                showcountries=True,
+                                countrycolor="darkgray",
+                                showocean=True,
+                                oceancolor="lightblue",
+                                showlakes=True,
+                                lakecolor="lightblue",
+                                showland=True,
+                                landcolor="lightgray",
+                                lataxis_range=[-11, 6],
+                                lonaxis_range=[95, 141],
+                                center={"lat": -2.5, "lon": 118},
+                                projection_type="natural earth",
+                                bgcolor="white"
+                            )
+                            fig_map.update_layout(
+                                height=600,
+                                margin=dict(l=0, r=0, t=40, b=0),
+                                geo=dict(
+                                    scope="asia",
+                                    projection_scale=3.5,
+                                    center={"lat": -2.5, "lon": 118},
+                                    lonaxis_range=[95, 141],
+                                    lataxis_range=[-11, 6],
+                                    bgcolor="white"
+                                )
+                            )
+                            logger.info("Peta scatter_geo berhasil dibuat")
+                            st.plotly_chart(fig_map, use_container_width=True)
+                        except Exception as e2:
+                            logger.error(f"Error juga di scatter_geo: {e2}")
+                            st.error(f"Gagal membuat peta: {e2}")
+                            st.dataframe(province_counts[["province", "count", "lat", "lon"]])
+                
+                # Gunakan province_counts untuk chart lainnya
+                location_counts = province_counts.rename(columns={"province": "location"})
                 
                 col1, col2 = st.columns(2)
                 
@@ -822,13 +1043,13 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
                         y="location",
                         orientation='h',
                         text="count",
-                        title="Top 15 Lokasi (Klik untuk filter)",
+                        title="Top 15 Provinsi (Klik untuk filter)",
                         color_discrete_sequence=px.colors.qualitative.Dark2,
                     )
                     fig_location.update_layout(
                         showlegend=False, 
                         xaxis_title="Jumlah Hoax", 
-                        yaxis_title="Lokasi", 
+                        yaxis_title="Provinsi", 
                         margin=dict(t=40, l=20, r=20, b=20),
                         clickmode='event+select',
                         dragmode='select'
@@ -864,7 +1085,7 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
                         location_counts.head(10),
                         values="count",
                         names="location",
-                        title="Distribusi Top 10 Lokasi (Klik untuk filter)",
+                        title="Distribusi Top 10 Provinsi (Klik untuk filter)",
                     )
                     fig_location_pie.update_traces(
                         textposition='inside', 
@@ -896,30 +1117,32 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
                 # Statistik
                 col_stat1, col_stat2, col_stat3 = st.columns(3)
                 with col_stat1:
-                    st.metric("Total Lokasi Unik", len(location_counts))
+                    st.metric("Total Provinsi", len(location_counts))
                 with col_stat2:
-                    st.metric("Lokasi Teratas", location_counts.iloc[0]["location"] if len(location_counts) > 0 else "N/A")
+                    st.metric("Provinsi Teratas", location_counts.iloc[0]["location"] if len(location_counts) > 0 else "N/A")
                 with col_stat3:
-                    st.metric("Jumlah dari Lokasi Teratas", location_counts.iloc[0]["count"] if len(location_counts) > 0 else 0)
+                    st.metric("Jumlah dari Provinsi Teratas", location_counts.iloc[0]["count"] if len(location_counts) > 0 else 0)
                 
-                # Tabel detail lokasi
-                st.markdown("#### Detail Persebaran Lokasi")
+                # Tabel detail provinsi
+                st.markdown("#### Detail Persebaran Provinsi")
+                display_df = location_counts[["location", "count"]].copy()
+                display_df.columns = ["Provinsi", "Jumlah Hoaks"]
                 st.dataframe(
-                    location_counts.head(20),
+                    display_df.head(20),
                     use_container_width=True,
                     hide_index=True
                 )
             else:
-                st.warning("Tidak ada data lokasi yang berhasil diekstrak dari content artikel.")
+                st.warning("Tidak ada data provinsi yang berhasil diekstrak dari content artikel.")
                 st.info("""
                 **Catatan:** 
-                - Lokasi diekstrak dari konten artikel menggunakan pattern matching
-                - Sistem mencari nama provinsi, kota besar, dan referensi lokasi dalam teks
-                - Jika tidak ada lokasi yang terdeteksi, mungkin artikel tidak menyebutkan lokasi spesifik
+                - Provinsi diekstrak dari konten artikel menggunakan pattern matching
+                - Sistem mencari nama provinsi dan memetakan kota ke provinsinya
+                - Jika tidak ada provinsi yang terdeteksi, mungkin artikel tidak menyebutkan lokasi spesifik
                 """)
         else:
-            st.warning("Kolom 'relevant_location' tidak tersedia. Pastikan fungsi enrich_with_locations sudah dipanggil.")
-            st.info("Lokasi diekstrak dari content artikel menggunakan pattern matching untuk menemukan nama provinsi dan kota di Indonesia.")
+            st.warning("Kolom 'relevant_province' tidak tersedia. Pastikan fungsi enrich_with_locations sudah dipanggil.")
+            st.info("Provinsi diekstrak dari content artikel menggunakan pattern matching untuk menemukan nama provinsi di Indonesia.")
     
     with tab3:
         st.markdown("### Platform dan Media")
