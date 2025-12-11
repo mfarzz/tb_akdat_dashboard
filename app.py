@@ -6,6 +6,7 @@ import sys
 import time
 import logging
 from pathlib import Path
+from datetime import date
 
 from loaders.article_loader import load_articles_df, enrich_with_dates, enrich_with_locations
 
@@ -80,8 +81,17 @@ st.markdown(
 
 
 if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
-    min_date = df["relevant_date"].min().date()
-    max_date = df["relevant_date"].max().date()
+    # Filter out future dates (beyond end of 2025)
+    max_allowed_date = date(2025, 10, 31)
+    df_filtered_dates = df[df["relevant_date"].notna()].copy()
+    df_filtered_dates = df_filtered_dates[pd.to_datetime(df_filtered_dates["relevant_date"]).dt.date <= max_allowed_date]
+    
+    if not df_filtered_dates.empty:
+        min_date = df_filtered_dates["relevant_date"].min().date()
+        max_date = min(df_filtered_dates["relevant_date"].max().date(), max_allowed_date)
+    else:
+        min_date = df["relevant_date"].min().date()
+        max_date = min(df["relevant_date"].max().date(), max_allowed_date)
     
     col_left, col_right = st.columns([3, 1])
     with col_right:
@@ -89,7 +99,7 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
             "Pilih rentang tanggal",
             value=(min_date, max_date),
             min_value=min_date,
-            max_value=max_date
+            max_value=max_allowed_date
         )
 
     if isinstance(date_range, (list, tuple)):
@@ -99,8 +109,13 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
 
     start_ts = pd.to_datetime(start_date)
     end_ts = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-
-    filtered_with_date = df[df["relevant_date"].between(start_ts, end_ts)]
+    
+    # Filter out future dates (beyond end of 2025)
+    max_allowed_ts = pd.to_datetime(date(2025, 12, 31))
+    filtered_with_date = df[
+        df["relevant_date"].between(start_ts, end_ts) & 
+        (pd.to_datetime(df["relevant_date"]) <= max_allowed_ts)
+    ]
 
     filtered_no_date = df[df["relevant_date"].isna()]
 
@@ -490,11 +505,12 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
                 st.rerun()
     
     # Tab untuk berbagai analisis
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Segmentasi Topik",
         "Persebaran Geografis", 
         "Platform dan Media",
-        "Pola dan Timeline"
+        "Pola dan Timeline",
+        "Clustering Konten"
     ])
     
     with tab1:
@@ -594,8 +610,8 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
             fig_class = px.bar(
                 class_counts.head(10),
                 x="classifications",
-                y="count",
-                text="count",
+        y="count",
+        text="count",
                 title="Top 10 Klasifikasi (Klik untuk filter)",
                 color_discrete_sequence=px.colors.qualitative.Pastel,
             )
@@ -887,7 +903,7 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
                         
                         # Untuk memperbesar bubble: gunakan multiplier yang lebih besar
                         # Formula: size = count * multiplier (semakin besar multiplier, semakin besar bubble)
-                        multiplier = 5.0  # Multiplier untuk memperbesar ukuran bubble
+                        multiplier = 15.0  # Multiplier untuk memperbesar ukuran bubble
                         
                         # Buat color map untuk setiap provinsi (setiap provinsi dapat warna berbeda)
                         # Gunakan color palette yang cukup banyak untuk membedakan provinsi
@@ -1246,9 +1262,18 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
                 filtered_df["published_at"] = pd.to_datetime(filtered_df["published_at"], errors='coerce')
             
             # Filter: relevant_date < published_at dan kedua kolom tidak null
+            max_allowed_date = date(2025, 12, 31)
+            max_allowed_ts = pd.to_datetime(max_allowed_date)
+            
             comparison_df = filtered_df[
                 (filtered_df["relevant_date"].notna()) & 
                 (filtered_df["published_at"].notna())
+            ].copy()
+            
+            # Filter out future dates
+            comparison_df = comparison_df[
+                (pd.to_datetime(comparison_df["relevant_date"]) <= max_allowed_ts) &
+                (pd.to_datetime(comparison_df["published_at"]) <= max_allowed_ts)
             ].copy()
             
             if not comparison_df.empty:
@@ -1422,7 +1447,12 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
             st.markdown("---")
             st.markdown("#### Timeline Berdasarkan Tanggal Relevan Hoax (Semua Data)")
             
+            max_allowed_date = date(2025, 12, 31)
+            
             date_df = filtered_df[filtered_df["relevant_date"].notna()].copy()
+            # Filter out future dates
+            date_df = date_df[pd.to_datetime(date_df["relevant_date"]).dt.date <= max_allowed_date]
+            
             if not date_df.empty:
                 date_df["date"] = pd.to_datetime(date_df["relevant_date"]).dt.date
                 daily_counts = date_df.groupby("date").size().reset_index()
@@ -1485,6 +1515,248 @@ if "relevant_date" in df.columns and not df["relevant_date"].dropna().empty:
         else:
             st.warning("Kolom 'relevant_date' tidak tersedia untuk analisis timeline.")
     
+
+    with tab5:
+        st.markdown("### Clustering Konten")
+        st.markdown("**Clustering artikel berdasarkan kesamaan konten menggunakan Sentence-BERT embeddings**")
+        
+        # Import clustering helper
+        try:
+            from helpers.content_clustering import (
+                get_embeddings_for_articles,
+                perform_clustering,
+                reduce_dimensions,
+                calculate_optimal_clusters,
+                get_cluster_statistics,
+                get_cluster_keywords
+            )
+            
+            # Check if DeepHoaxID is available
+            if not st.session_state.hoax_initialized or st.session_state.hoax_system is None:
+                st.warning("DeepHoaxID belum terinisialisasi. Clustering memerlukan similarity engine untuk mendapatkan embeddings.")
+                st.info("""
+                **Cara mengaktifkan:**
+                1. Pastikan DeepHoaxID sudah terinisialisasi (lihat bagian DeepHoaxID Detector di atas)
+                2. Refresh halaman jika perlu
+                """)
+            else:
+                similarity_engine = st.session_state.hoax_system.similarity_engine
+                
+                if similarity_engine is None:
+                    st.warning("Similarity Engine tidak tersedia. Pastikan DeepHoaxID sudah terinisialisasi dengan benar.")
+                else:
+                    # Filter data untuk clustering (maksimal 1000 artikel untuk performa)
+                    clustering_df = filtered_df.copy()
+                    
+                    if len(clustering_df) > 1000:
+                        st.info(f"Menggunakan sample 1000 artikel untuk performa.")
+                        clustering_df = clustering_df.sample(n=1000, random_state=42).reset_index(drop=True)
+                    
+                    if "content" not in clustering_df.columns:
+                        st.error("Kolom 'content' tidak ditemukan. Tidak dapat melakukan clustering.")
+                    else:
+                        # Parameters
+                        col_param1, col_param2, col_param3 = st.columns(3)
+                        
+                        with col_param1:
+                            n_clusters = st.slider(
+                                "Jumlah Cluster",
+                                min_value=2,
+                                max_value=min(20, len(clustering_df) // 10),
+                                value=5,
+                                help="Jumlah cluster yang ingin dibuat"
+                            )
+                        
+                        with col_param2:
+                            use_optimal = st.checkbox(
+                                "Gunakan Jumlah Optimal",
+                                value=False,
+                                help="Hitung jumlah cluster optimal menggunakan Elbow Method"
+                            )
+                        
+                        with col_param3:
+                            reduction_method = st.selectbox(
+                                "Metode Reduksi Dimensi",
+                                options=['pca', 'tsne'],
+                                index=0,
+                                help="PCA lebih cepat, t-SNE lebih baik untuk visualisasi"
+                            )
+                        
+                        # Button untuk clustering
+                        if st.button("Jalankan Clustering", type="primary", use_container_width=True):
+                            with st.spinner("Mendapatkan embeddings dari Sentence-BERT..."):
+                                embeddings = get_embeddings_for_articles(
+                                    clustering_df,
+                                    similarity_engine,
+                                    text_column='content'
+                                )
+                            
+                            if embeddings is not None:
+                                # Calculate optimal clusters if requested
+                                if use_optimal:
+                                    with st.spinner("Menghitung jumlah cluster optimal..."):
+                                        n_clusters = calculate_optimal_clusters(embeddings, max_clusters=20)
+                                        st.success(f"Jumlah cluster optimal: {n_clusters}")
+                                
+                                # Perform clustering
+                                with st.spinner(f"Melakukan clustering ke {n_clusters} cluster..."):
+                                    cluster_labels, kmeans_model = perform_clustering(
+                                        embeddings,
+                                        n_clusters=n_clusters
+                                    )
+                                
+                                # Reduce dimensions for visualization
+                                with st.spinner(f"Mengurangi dimensi menggunakan {reduction_method.upper()}..."):
+                                    reduced_embeddings = reduce_dimensions(
+                                        embeddings,
+                                        method=reduction_method,
+                                        n_components=2
+                                    )
+                                
+                                # Add cluster labels to dataframe
+                                clustering_df['cluster'] = cluster_labels
+                                
+                                # Store in session state
+                                st.session_state.clustering_result = {
+                                    'df': clustering_df,
+                                    'embeddings': embeddings,
+                                    'reduced_embeddings': reduced_embeddings,
+                                    'cluster_labels': cluster_labels,
+                                    'kmeans_model': kmeans_model,
+                                    'n_clusters': n_clusters
+                                }
+                                
+                                st.success(f"Clustering selesai! {n_clusters} cluster dibuat dari {len(clustering_df)} artikel.")
+                        
+                        # Display results if available
+                        if 'clustering_result' in st.session_state:
+                            result = st.session_state.clustering_result
+                            clustering_df = result['df']
+                            reduced_embeddings = result['reduced_embeddings']
+                            cluster_labels = result['cluster_labels']
+                            n_clusters = result['n_clusters']
+                            
+                            st.markdown("---")
+                            
+                            # Visualization
+                            col_viz1, col_viz2 = st.columns(2)
+                            
+                            with col_viz1:
+                                st.markdown("#### Visualisasi Cluster (2D)")
+                                
+                                # Create scatter plot
+                                viz_df = pd.DataFrame({
+                                    'x': reduced_embeddings[:, 0],
+                                    'y': reduced_embeddings[:, 1],
+                                    'cluster': cluster_labels,
+                                    'title': clustering_df.get('title', [''] * len(clustering_df)).fillna('').astype(str)
+                                })
+                                
+                                fig_cluster = px.scatter(
+                                    viz_df,
+                                    x='x',
+                                    y='y',
+                                    color='cluster',
+                                    hover_data=['title'],
+                                    title=f'Visualisasi {n_clusters} Cluster',
+                                    color_discrete_sequence=px.colors.qualitative.Set3,
+                                    labels={'x': f'{reduction_method.upper()} Component 1', 'y': f'{reduction_method.upper()} Component 2'}
+                                )
+                                fig_cluster.update_layout(
+                                    height=500,
+                                    showlegend=True,
+                                    legend=dict(title="Cluster")
+                                )
+                                st.plotly_chart(fig_cluster, use_container_width=True)
+                            
+                            with col_viz2:
+                                st.markdown("#### Statistik Cluster")
+                                
+                                # Get cluster statistics
+                                cluster_stats = get_cluster_statistics(clustering_df, cluster_labels)
+                                
+                                if not cluster_stats.empty:
+                                    # Display statistics
+                                    for idx, row in cluster_stats.iterrows():
+                                        with st.expander(f"Cluster {int(row['cluster'])}: {int(row['jumlah_artikel'])} artikel ({row['persentase']:.1f}%)"):
+                                            st.write(f"**Jumlah Artikel:** {int(row['jumlah_artikel'])}")
+                                            st.write(f"**Persentase:** {row['persentase']:.1f}%")
+                                            
+                                            if 'kategori_teratas' in row and pd.notna(row['kategori_teratas']):
+                                                st.write(f"**Kategori Teratas:** {row['kategori_teratas']} ({int(row.get('jumlah_kategori_teratas', 0))})")
+                                            
+                                            if 'provinsi_teratas' in row and pd.notna(row['provinsi_teratas']):
+                                                st.write(f"**Provinsi Teratas:** {row['provinsi_teratas']}")
+                                            
+                                            if 'platform_teratas' in row and pd.notna(row['platform_teratas']):
+                                                st.write(f"**Platform Teratas:** {row['platform_teratas']}")
+                                    
+                                    # Cluster distribution chart
+                                    fig_dist = px.bar(
+                                        cluster_stats,
+                                        x='cluster',
+                                        y='jumlah_artikel',
+                                        title='Distribusi Artikel per Cluster',
+                                        color='cluster',
+                                        color_discrete_sequence=px.colors.qualitative.Set3,
+                                        text='jumlah_artikel'
+                                    )
+                                    fig_dist.update_layout(
+                                        showlegend=False,
+                                        xaxis_title="Cluster",
+                                        yaxis_title="Jumlah Artikel",
+                                        height=300
+                                    )
+                                    fig_dist.update_traces(textposition="outside")
+                                    st.plotly_chart(fig_dist, use_container_width=True)
+                            
+                            # Cluster keywords
+                            st.markdown("---")
+                            st.markdown("#### Kata Kunci per Cluster")
+                            
+                            cluster_keywords = get_cluster_keywords(clustering_df, cluster_labels, top_n=10)
+                            
+                            cols_keywords = st.columns(min(3, n_clusters))
+                            for idx, cluster_id in enumerate(sorted(cluster_keywords.keys())):
+                                col_idx = idx % len(cols_keywords)
+                                with cols_keywords[col_idx]:
+                                    keywords = cluster_keywords[cluster_id]
+                                    st.markdown(f"**Cluster {cluster_id}:**")
+                                    st.write(", ".join(keywords[:10]))
+                            
+                            # Sample articles per cluster
+                            st.markdown("---")
+                            st.markdown("#### Sample Artikel per Cluster")
+                            
+                            for cluster_id in sorted(clustering_df['cluster'].unique()):
+                                cluster_articles = clustering_df[clustering_df['cluster'] == cluster_id].head(5)
+                                
+                                with st.expander(f"Cluster {cluster_id} - {len(cluster_articles)} sample artikel"):
+                                    for art_idx, (_, article) in enumerate(cluster_articles.iterrows(), 1):
+                                        st.markdown(f"**Artikel {art_idx}:**")
+                                        
+                                        if 'title' in article and pd.notna(article['title']):
+                                            st.write(f"**Judul:** {article['title']}")
+                                        
+                                        if 'content' in article and pd.notna(article['content']):
+                                            content_preview = str(article['content'])[:200] + "..."
+                                            st.write(f"**Preview:** {content_preview}")
+                                        
+                                        if 'categories' in article and pd.notna(article['categories']):
+                                            st.write(f"**Kategori:** {article['categories']}")
+                                        
+                                        st.markdown("---")
+                        else:
+                            st.info("👆 Klik tombol 'Jalankan Clustering' untuk memulai analisis clustering.")
+                            
+        except ImportError as e:
+            st.error(f"❌ Error mengimpor modul clustering: {e}")
+            st.code("Pastikan scikit-learn sudah terinstall: pip install scikit-learn")
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+            import traceback
+            with st.expander("Detail Error"):
+                st.code(traceback.format_exc())
 
 else:
     st.warning("Kolom 'relevant_date' tidak ditemukan atau kosong. Menampilkan semua data.")
